@@ -6,6 +6,7 @@ import { DocumentHead, loader$ } from '@builder.io/qwik-city'
 import { WildebeestLogo } from '~/components/MastodonLogo'
 import { Avatar } from '~/components/avatar'
 import { Account } from '~/types'
+import { getPersonByEmail } from 'wildebeest/backend/src/activitypub/actors'
 
 export const clientLoader = loader$<{ DATABASE: D1Database }, Promise<Client>>(async ({ platform, query }) => {
 	const client_id = query.get('client_id') || ''
@@ -16,23 +17,27 @@ export const clientLoader = loader$<{ DATABASE: D1Database }, Promise<Client>>(a
 	return client
 })
 
-export const userLoader = loader$<{ DATABASE: D1Database; domain: string }, Promise<{ email: string }>>(
-	async ({ cookie }) => {
-		const jwt = cookie.get('CF_Authorization')
-		if (jwt === null) {
-			throw new Error('missing authorization')
-		}
-		try {
-			// TODO: eventually, verify the JWT with Access, however this
-			// is not critical.
-			const payload = access.getPayload(jwt.value)
-			return { email: payload.email }
-		} catch (err: unknown) {
-			console.warn(err.stack)
-			throw new Error('failed to validate Access JWT')
-		}
+export const userLoader = loader$<
+	{ DATABASE: D1Database; domain: string },
+	Promise<{ email?: string; avatar?: URL; name?: string }>
+>(async ({ cookie, platform }) => {
+	const jwt = cookie.get('CF_Authorization')
+	if (jwt === null) {
+		throw new Error('missing authorization')
 	}
-)
+	try {
+		// TODO: eventually, verify the JWT with Access, however this
+		// is not critical.
+		const payload = access.getPayload(jwt.value)
+		const person = payload.email ? await getPersonByEmail(platform.DATABASE, payload.email) : null
+		const name = person?.name
+		const avatar = person?.icon?.url
+		return { email: payload.email, avatar, name }
+	} catch (err: unknown) {
+		console.warn(err.stack)
+		throw new Error('failed to validate Access JWT')
+	}
+})
 
 export default component$(() => {
 	const client = clientLoader.use().value
@@ -50,10 +55,9 @@ export default component$(() => {
 							<Avatar
 								primary={
 									{
-										// TODO: fetch the avatar in the loader (using getPersonByEmail?)
-										avatar:
-											'https://files.mastodon.social/accounts/avatars/109/502/260/753/916/593/original/f721da0f38083abf.jpg',
-									} as Account
+										avatar: user.avatar,
+										display_name: user.name,
+									} as unknown as Account
 								}
 								secondary={null}
 							/>
